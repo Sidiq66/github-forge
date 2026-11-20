@@ -101,15 +101,18 @@ function advertisementRefs(repo: RepoRec): RefLine[] {
   return lines;
 }
 
+/** The v2 advertisement is the same bytes for every repository; build it once. */
+const V2_ADVERTISEMENT: Buffer = Buffer.concat([
+  pkt('version 2\n'),
+  pkt(`agent=${AGENT}\n`),
+  pkt('ls-refs=unborn\n'),
+  pkt('fetch=shallow wait-for-done\n'),
+  pkt('object-format=sha1\n'),
+  PKT_FLUSH,
+]);
+
 function v2Advertisement(): Buffer {
-  return Buffer.concat([
-    pkt('version 2\n'),
-    pkt(`agent=${AGENT}\n`),
-    pkt('ls-refs=unborn\n'),
-    pkt('fetch=shallow wait-for-done\n'),
-    pkt('object-format=sha1\n'),
-    PKT_FLUSH,
-  ]);
+  return V2_ADVERTISEMENT;
 }
 
 function v0Advertisement(repo: RepoRec, service: 'git-upload-pack' | 'git-receive-pack'): Buffer {

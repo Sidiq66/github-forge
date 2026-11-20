@@ -178,9 +178,18 @@ export class Store {
   }
 }
 
+/** Memoised globalId results: the encoding of a given id never changes. */
+const globalIdCache = new Map<string, string>();
+
 /** An opaque, stable GraphQL global id for a stored object, e.g. Issue:<repoId>:<number>. */
 export function globalId(type: string, ...parts: Array<string | number>): string {
-  return Buffer.from([type, ...parts.map(String)].join(':'), 'utf8').toString('base64');
+  const joined = [type, ...parts.map(String)].join(':');
+  let id = globalIdCache.get(joined);
+  if (id === undefined) {
+    id = Buffer.from(joined, 'utf8').toString('base64');
+    globalIdCache.set(joined, id);
+  }
+  return id;
 }
 
 /** The parts a global id was built from, or null when the string is not one of ours. */

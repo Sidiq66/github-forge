@@ -43,7 +43,8 @@ function authorized(req: IncomingMessage): boolean {
 async function readBody(req: IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) chunks.push(chunk as Buffer);
-  return Buffer.concat(chunks);
+  // The common case is a single chunk; concatenating it would only copy it.
+  return chunks.length === 1 ? (chunks[0] as Buffer) : Buffer.concat(chunks);
 }
 
 function sendJson(
@@ -73,7 +74,8 @@ async function handle(store: Store, req: IncomingMessage, res: ServerResponse): 
 
   const needsBody = method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE';
   const body = needsBody ? await readBody(req) : Buffer.alloc(0);
-  const bodyText = body.toString('utf8');
+  // The body is decoded as text only by the surfaces that speak JSON; the git
+  // transport's bodies are binary packs, and decoding one would be pure waste.
 
   if (pathname === '/mcp') {
     if (!authorized(req)) {
@@ -84,7 +86,7 @@ async function handle(store: Store, req: IncomingMessage, res: ServerResponse): 
       sendJson(store, res, 405, { message: 'Method Not Allowed' });
       return;
     }
-    const reply = handleMcp(store, bodyText);
+    const reply = handleMcp(store, body.toString('utf8'));
     if (reply.status === 202) {
       res.writeHead(202);
       res.end();
@@ -103,7 +105,7 @@ async function handle(store: Store, req: IncomingMessage, res: ServerResponse): 
       sendJson(store, res, 405, { message: 'Method Not Allowed' });
       return;
     }
-    const reply = handleGraphql(store, bodyText);
+    const reply = handleGraphql(store, body.toString('utf8'));
     sendJson(store, res, reply.status, reply.body);
     return;
   }
@@ -121,7 +123,7 @@ async function handle(store: Store, req: IncomingMessage, res: ServerResponse): 
       segments,
       remainder,
       query: url.searchParams,
-      bodyText,
+      bodyText: body.toString('utf8'),
       selfUrl: `http://${req.headers.host ?? 'forge.local'}${pathname}`,
     });
     if (reply.status === 204) {

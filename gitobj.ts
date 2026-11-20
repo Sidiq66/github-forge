@@ -17,8 +17,9 @@ export function sha1Hex(data: Buffer): string {
 
 /** The object id of an object: sha1 of "<type> <size>\0" followed by the raw bytes. */
 export function hashObject(type: ObjType, data: Buffer): string {
-  const header = Buffer.from(`${type} ${data.length}\0`, 'utf8');
-  return sha1Hex(Buffer.concat([header, data]));
+  // Feed the hash the header and the bytes in two updates: the digest is the
+  // same as hashing their concatenation, without allocating the joined copy.
+  return createHash('sha1').update(`${type} ${data.length}\0`, 'utf8').update(data).digest('hex');
 }
 
 // ---------------------------------------------------------------- trees and commits
@@ -129,12 +130,19 @@ export function writePack(objects: readonly GitObject[]): Buffer {
   header.writeUInt32BE(2, 4);
   header.writeUInt32BE(objects.length, 8);
   const parts: Buffer[] = [header];
+  // The trailer is the sha1 of every preceding byte; feed the hash as the
+  // parts are built so the pack is concatenated once, not twice.
+  const trailer = createHash('sha1');
+  trailer.update(header);
   for (const object of objects) {
-    parts.push(encodePackEntryHeader(TYPE_TO_CODE[object.type], object.data.length));
-    parts.push(deflateSync(object.data));
+    const entryHeader = encodePackEntryHeader(TYPE_TO_CODE[object.type], object.data.length);
+    const deflated = deflateSync(object.data);
+    parts.push(entryHeader, deflated);
+    trailer.update(entryHeader);
+    trailer.update(deflated);
   }
-  const body = Buffer.concat(parts);
-  return Buffer.concat([body, Buffer.from(sha1Hex(body), 'hex')]);
+  parts.push(Buffer.from(trailer.digest('hex'), 'hex'));
+  return Buffer.concat(parts);
 }
 
 function encodePackEntryHeader(typeCode: number, size: number): Buffer {
@@ -225,9 +233,12 @@ export function readPack(
   }
 
   const plainOidIndex = new Map<string, number>();
+  const plainOids: Array<string | undefined> = raw.map(() => undefined);
   raw.forEach((entry, index) => {
     if (entry.type !== 'ofs-delta' && entry.type !== 'ref-delta') {
-      plainOidIndex.set(hashObject(entry.type, entry.data), index);
+      const oid = hashObject(entry.type, entry.data);
+      plainOidIndex.set(oid, index);
+      plainOids[index] = oid;
     }
   });
 
@@ -272,7 +283,9 @@ export function readPack(
   for (let index = 0; index < raw.length; index += 1) {
     const object = resolve(index);
     objects.push(object);
-    oids.push(hashObject(object.type, object.data));
+    // A plain entry's id was already computed for the index above; only a
+    // delta-resolved object still needs its hash taken here.
+    oids.push(plainOids[index] ?? hashObject(object.type, object.data));
   }
   return Object.assign(objects, { oids });
 }
